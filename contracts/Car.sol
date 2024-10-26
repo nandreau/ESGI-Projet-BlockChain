@@ -5,7 +5,7 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
-contract CarNFT is ERC721, AccessControl {
+contract Car is ERC721, AccessControl {
   bytes32 public constant ADMIN_ROLE = DEFAULT_ADMIN_ROLE;
   bytes32 public constant GARAGE_ROLE = keccak256("GARAGE_ROLE");
 
@@ -47,7 +47,7 @@ contract CarNFT is ERC721, AccessControl {
   mapping(uint256 => Vehicle) private vehicles;
 
   // Constructeur 
-  constructor() ERC721("CarNFT", "CAR") {
+  constructor() ERC721("Car", "CAR") {
     _grantRole(ADMIN_ROLE, msg.sender);
     _grantRole(GARAGE_ROLE, msg.sender);
   }

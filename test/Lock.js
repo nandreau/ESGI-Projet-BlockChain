@@ -1,126 +1,89 @@
-const {
-  time,
-  loadFixture,
-} = require("@nomicfoundation/hardhat-toolbox/network-helpers");
-const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 const { expect } = require("chai");
+const { ethers } = require("hardhat");
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("Car", function () {
+  let Car, car;
+  let owner, garage, addr1, addr2;
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
-
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
-
-    const Lock = await ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
-
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
-
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
-
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.owner()).to.equal(owner.address);
-    });
-
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
-
-      expect(await ethers.provider.getBalance(lock.target)).to.equal(
-        lockedAmount
-      );
-    });
-
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
-    });
+  beforeEach(async function () {
+    // Obtenir la fabrique de contrat et les signers
+    Car = await ethers.getContractFactory("Car");
+    [owner, garage, addr1, addr2] = await ethers.getSigners();
+    car = await Car.deploy();
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+  it("Should deploy and set roles correctly", async function () {
+    expect(await car.hasRole(car.ADMIN_ROLE(), owner.address)).to.equal(true);
+    expect(await car.hasRole(car.GARAGE_ROLE(), owner.address)).to.equal(true);
+  });
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+  it("Should mint a new vehicle", async function () {
+    const technicalControl = { isValid: true, expirationDate: Math.floor(Date.now() / 1000) + 31536000 }; // Validité d'1 an
+    await car.mintVehicle(addr1.address, 1, "Toyota", "ABC123", "CERT123", 0, technicalControl);
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // Vérifie le propriétaire du token
+    expect(await car.ownerOf(1)).to.equal(addr1.address);
 
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
+    // Vérifie les informations du véhicule
+    const vehicleInfo = await car.getVehicleInformations(1);
+    expect(vehicleInfo.brand).to.equal("Toyota");
+    expect(vehicleInfo.chassisNumber).to.equal("ABC123");
+    expect(vehicleInfo.registrationCertificate).to.equal("CERT123");
+    expect(vehicleInfo.state).to.equal(0); 
+  });
 
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
+  it("Should allow garage to add a repair", async function () {
+    const technicalControl = { isValid: true, expirationDate: Math.floor(Date.now() / 1000) + 31536000 };
+    await car.mintVehicle(addr1.address, 2, "Honda", "XYZ789", "CERT456", 0, technicalControl);
+    await car.grantRole(car.GARAGE_ROLE(), garage.address);
 
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // Ajoute une réparation depuis le compte garage
+    const garageInfo = { name: "SuperGarage", location: "CityCenter", phoneNumber: "123456789" };
+    await car.connect(garage).addRepair(2, "Engine repair", garageInfo);
 
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
+    // Vérifie que le nombre de réparations a augmenté
+    expect(await car.getRepairCount(2)).to.equal(1);
+  });
 
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
+  it("Should update the technical control", async function () {
+    const technicalControl = { isValid: true, expirationDate: Math.floor(Date.now() / 1000) + 31536000 };
+    await car.mintVehicle(addr1.address, 3, "Ford", "LMN456", "CERT789", 0, technicalControl);
+    await car.grantRole(car.GARAGE_ROLE(), garage.address);
 
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // Mettre à jour le contrôle technique
+    const newExpirationDate = Math.floor(Date.now() / 1000) + 63072000; // 2 ans à partir de maintenant
+    await car.connect(garage).updateTechnicalControl(3, false, newExpirationDate);
 
-        await time.increaseTo(unlockTime);
+    // Vérifie le contrôle technique mis à jour
+    const tc = await car.getTechnicalControl(3);
+    expect(tc.isValid).to.equal(false);
+    expect(tc.expirationDate).to.equal(newExpirationDate);
+  });
 
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
+  it("Should change the vehicle state", async function () {
+    const technicalControl = { isValid: true, expirationDate: Math.floor(Date.now() / 1000) + 31536000 };
+    await car.mintVehicle(addr1.address, 4, "Nissan", "LMN987", "CERT654", 0, technicalControl);
 
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    // Accorder le rôle GARAGE_ROLE au compte garage
+    await car.grantRole(car.GARAGE_ROLE(), garage.address);
 
-        await time.increaseTo(unlockTime);
+    // Change l'état du véhicule
+    await car.connect(garage).changeState(4, 1);
 
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
-    });
+    const vehicleInfo = await car.getVehicleInformations(4);
+    expect(vehicleInfo.state).to.equal(1); // Vérifie que l'état est maintenant volé
+  });
+
+  it("Should fail to add repair without GARAGE_ROLE", async function () {
+    const technicalControl = { isValid: true, expirationDate: Math.floor(Date.now() / 1000) + 31536000 };
+    await car.mintVehicle(addr1.address, 5, "BMW", "QWE123", "CERT111", 0, technicalControl);
+  
+    // Essaie d'ajouter une réparation sans avoir le GARAGE_ROLE
+    const garageInfo = { name: "UnauthorizedGarage", location: "Unknown", phoneNumber: "987654321" };
+    
+    // Nous nous attendons à ce que la transaction échoue en raison du manque de permissions
+    await expect(
+      car.connect(addr1).addRepair(5, "Brake repair", garageInfo)
+    ).to.be.reverted;
   });
 });
