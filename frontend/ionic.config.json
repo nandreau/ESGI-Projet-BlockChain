@@ -1,0 +1,7 @@
+{
+  "name": "Blockchain vehicle repair monitoring",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular-standalone"
+}
