@@ -15,18 +15,19 @@ contract Car is ERC721, AccessControl {
         return super.supportsInterface(interfaceId);
     }
 
-    // Etat du véhicule
+    // Enumération de l'état du véhicule
     enum VehicleState {
         InCirculation,
         Stolen,
         Wreck
     }
 
-    // Structure pour l'entité du Garage
+    // Structure représentant un Garage
     struct Garage {
         string name;
         string location;
         string phoneNumber;
+        bool isRegistered;
     }
 
     // Structure pour les réparations
@@ -55,6 +56,9 @@ contract Car is ERC721, AccessControl {
     // Mapping pour les informations du véhicule
     mapping(uint256 => Vehicle) private vehicles;
 
+    // Nouveau mapping pour les garages enregistrés
+    mapping(address => Garage) private registeredGarages;
+
     // Events pour suivre les modifications
     event RepairAdded(
         uint256 indexed tokenId,
@@ -67,6 +71,7 @@ contract Car is ERC721, AccessControl {
         uint256 expirationDate
     );
     event StateChanged(uint256 indexed tokenId, VehicleState newState);
+    event GarageRegistered(address indexed garageAddress, string name);
 
     // Constructeur
     constructor() ERC721("Car", "CAR") {
@@ -74,7 +79,33 @@ contract Car is ERC721, AccessControl {
         _grantRole(GARAGE_ROLE, msg.sender);
     }
 
-    // Fonction Mint
+    // Fonction pour enregistrer un garage
+    function registerGarage(
+        address garageAddress,
+        string memory name,
+        string memory location,
+        string memory phoneNumber
+    ) public onlyRole(ADMIN_ROLE) {
+        require(
+            !registeredGarages[garageAddress].isRegistered,
+            "Garage already registered"
+        );
+
+        // Enregistrer le garage avec les informations fournies
+        registeredGarages[garageAddress] = Garage({
+            name: name,
+            location: location,
+            phoneNumber: phoneNumber,
+            isRegistered: true
+        });
+
+        // Accorder le rôle GARAGE_ROLE au garage
+        _grantRole(GARAGE_ROLE, garageAddress);
+
+        emit GarageRegistered(garageAddress, name);
+    }
+
+    // Fonction pour créer (mint) un véhicule par un garage enregistré
     function mintVehicle(
         address to,
         uint256 tokenId,
@@ -83,7 +114,8 @@ contract Car is ERC721, AccessControl {
         string memory registrationCertificate,
         VehicleState state,
         TechnicalControl memory technicalControl
-    ) public onlyRole(ADMIN_ROLE) {
+    ) public onlyRole(GARAGE_ROLE) {
+        // Removed `isRegistered` check since onlyRole ensures authorized access
         _safeMint(to, tokenId);
 
         Vehicle storage vehicle = vehicles[tokenId];
@@ -94,6 +126,7 @@ contract Car is ERC721, AccessControl {
         vehicle.technicalControl = technicalControl;
     }
 
+
     // Fonction pour ajouter une réparation
     function addRepair(
         uint256 tokenId,
@@ -101,6 +134,7 @@ contract Car is ERC721, AccessControl {
         Garage memory garage
     ) public onlyRole(GARAGE_ROLE) {
         require(ownerOf(tokenId) != address(0), "Vehicle does not exist");
+
         vehicles[tokenId].repairs.push(
             Repair({
                 description: description,
@@ -112,6 +146,8 @@ contract Car is ERC721, AccessControl {
         emit RepairAdded(tokenId, description, block.timestamp);
     }
 
+
+
     // Fonction pour mettre à jour le contrôle technique
     function updateTechnicalControl(
         uint256 tokenId,
@@ -119,6 +155,7 @@ contract Car is ERC721, AccessControl {
         uint256 expirationDate
     ) public onlyRole(GARAGE_ROLE) {
         require(ownerOf(tokenId) != address(0), "Vehicle does not exist");
+
         vehicles[tokenId].technicalControl = TechnicalControl({
             isValid: isValid,
             expirationDate: expirationDate
@@ -133,12 +170,13 @@ contract Car is ERC721, AccessControl {
         VehicleState state
     ) public onlyRole(GARAGE_ROLE) {
         require(ownerOf(tokenId) != address(0), "Vehicle does not exist");
+
         vehicles[tokenId].state = state;
 
         emit StateChanged(tokenId, state);
     }
 
-    // Fonction pour récupérer les informations du véhicule
+    // Récupérer les informations de base du véhicule
     function getVehicleInformations(
         uint256 tokenId
     )
@@ -162,7 +200,7 @@ contract Car is ERC721, AccessControl {
         );
     }
 
-    // Fonction pour récupérer les informations du contrôle technique
+    // Récupérer les informations de contrôle technique
     function getTechnicalControl(
         uint256 tokenId
     ) public view returns (bool isValid, uint256 expirationDate) {
@@ -172,14 +210,14 @@ contract Car is ERC721, AccessControl {
         return (tc.isValid, tc.expirationDate);
     }
 
-    // Fonction pour récupérer le nombre de réparations
+    // Récupérer le nombre de réparations
     function getRepairCount(uint256 tokenId) public view returns (uint256) {
         require(ownerOf(tokenId) != address(0), "Vehicle does not exist");
 
         return vehicles[tokenId].repairs.length;
     }
 
-    // Fonction pour récupérer les détails d'une réparation spécifique
+    // Détails d'une réparation spécifique
     function getRepairDetails(
         uint256 tokenId,
         uint256 index
